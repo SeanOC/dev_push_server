@@ -1,5 +1,5 @@
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from dateutil.parser import parse as parse_timestr
 from dateutil.tz import tzutc
@@ -30,23 +30,43 @@ class PushServer(object):
 
 
     def on_subscribe(self, request):
-        last_modified = local.last_modified = request.headers.get('last_modified', None)
-        channel = request.args.get('channel', None)
-        
-        if channel is not None:
-            if last_modified is not None:
-                last_modified = parse_timestr(last_modified)
-        
-            local.next_update = next_update = self.get_next_update(channel, last_modified)
-            while (next_update is None):
-                time.sleep(1)
-                next_update = self.get_next_update(channel, last_modified)
-        
-            response = self.send_update(next_update)
+        if request.method == "OPTIONS":
+            # Handle cross-domian ajax
+            response = Response()
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET'
+            response.headers['Access-Control-Allow-Headers'] = 'last_modified,if-modified-since,x-requested-with'
+            response.headers['Access-Control-Max-Age'] = 86400
+            return response
+            
         else:
-            response = Response(response="A channel get param must be passed.", status=400)
+            # Handle a normal request
+            last_modified = local.last_modified = request.headers.get('last_modified', None)
+            if last_modified is None:
+                last_modified = local.last_modified = request.headers.get('If-Modified-Since', None)
+                
+            channel = request.args.get('channel', None)
         
-        return response
+            if channel is not None:
+                if last_modified is not None:
+                    last_modified = parse_timestr(last_modified)
+                    last_modified += timedelta(seconds=1)
+        
+                local.next_update = next_update = self.get_next_update(channel, last_modified)
+                while (next_update is None):
+                    time.sleep(1)
+                    next_update = self.get_next_update(channel, last_modified)
+        
+                response = self.send_update(next_update)
+            else:
+                response = Response(response="A channel get param must be passed.", status=400)
+        
+           
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET'
+            response.headers['Access-Control-Allow-Headers'] = 'last_modified,if-modified-since,x-requested-with'
+            response.headers['Access-Control-Max-Age'] = 86400
+            return response
         
     def send_update(self, update):
         response = Response(
@@ -54,6 +74,7 @@ class PushServer(object):
             content_type=update['content_type'],
         )
         response.last_modified = update['published_on']
+        response.headers['If-Modified-Since'] = update['published_on']
         
         return response
         
